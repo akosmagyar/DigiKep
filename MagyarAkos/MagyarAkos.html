@@ -1,0 +1,791 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset=utf-8>
+    <title>Grafika beadandó első mérföldkő</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { width: 100%; height: 100% }
+
+        #side { position: absolute; right: 1rem; top: 1rem; padding: 10px;
+        }
+        .h { color: #808080 }
+        .c { display: block; margin-right: 1rem; right: 1rem; }
+        #side { position: absolute; right: 1rem; top: 1rem; width: 100%; }
+        .t { color: #71b87b }
+        .c { display: inline; margin-right: 1rem; right: 1rem }
+    </style>
+</head>
+
+<div align="right"  id="side">
+    <div class="c">
+        <span class="t">Fog:</span> <span class="h">  f</span>
+    </div> <br>
+
+    <div class="c">
+        <span class="t">Go to night mode:</span> <span class="h">  n</span>
+    </div> <br>
+
+    <div class="c">
+        <span class="t">Ride the car:</span> <span class="h">  b</span>
+    </div> <br>
+
+    <div class="c">
+        <span class="t">Respawn the car:</span> <span class="h">  c</span>
+    </div>
+</div>
+
+<body onload="init()">
+
+<script src="../MagyarAkos/js/three.min.js"></script>
+<script src="../MagyarAkos//js/TrackballControls.js"></script>
+<script src="../MagyarAkos//js/OrbitControls.js"></script>
+<script src="../MagyarAkos//js/OBJLoader.js"></script>
+<script src="../MagyarAkos//js/dat.gui.min.js"></script>
+<script src="../MagyarAkos//js/OBJLoader2.js"></script>
+<script src="../MagyarAkos//js/MTLLoader.js"></script>
+<script src="../MagyarAkos//js/LoaderSupport.js"></script>
+<script src="../MagyarAkos//js/OBJMTLLoader.js"></script>
+<script src="../MagyarAkos//js/stats.min.js"></script>
+<script src="../MagyarAkos//js//Water.js"></script>
+<script src="../MagyarAkos//js//SubdivisionModifier.js"></script>
+<script src="../MagyarAkos//physi.js"></script>
+
+
+<script id="vertexShader" type="x-shader/x-vertex">
+uniform float time;
+uniform float magnitude;
+uniform float freq;
+varying vec3  vNormal;
+varying vec2  vUv;
+
+	void main()	{
+		vec3 newPosition = position;
+		vNormal = normal;
+		vUv = uv;
+	    newPosition.z = magnitude * (sin(freq * position.x + time) + cos(freq*position.y + time));
+		gl_Position = projectionMatrix * modelViewMatrix * vec4(newPosition, 1.0);
+	}
+</script>
+
+<script id="fragmentShader" type="x-shader/x-fragment">
+
+varying vec3     vNormal;
+varying vec2     vUv;
+uniform sampler2D texImage;
+	void main()	{
+		gl_FragColor = texture2D(texImage, vUv);
+		//${THREE.ShaderChunk[ "fog_fragment" ]};
+	}
+</script>
+
+
+
+<script>
+
+//    'use strict';
+
+    // Configure the Physijs.scripts.worker and Physijs.scripts.ammo Javascript parameters to point at the web worker and Ammo.js scripts
+    Physijs.scripts.worker = '../MagyarAkos/physijs_worker.js';
+    Physijs.scripts.ammo = '../MagyarAkos/js/ammo.js';
+    // Globális változók
+
+    var WIDTH, HEIGHT, aspectRatio;
+    var renderer;
+    var scene, camera, time;
+    var controls;
+    var geometry, material, mesh;
+    var sound;
+    var skyCamera, skyScene, skyMesh;
+    var clock = new THREE.Clock(), delta = 0;
+    var sinusSpeed = 0;
+    var stats;
+    var roadMesh, roadMesh2,roadGeometry, roadGeometry2;
+    var fogActive = false;
+    var soundOn = false;
+
+    var car, car2,Forest, Forest1, Forest2, Forest3, water, rot, rot2;
+    var move = false;
+    var carOrientation = 0;
+
+    var prevX, prevY, prevZ;
+
+    var loader = new THREE.TextureLoader();
+
+// init();
+    // initSky();
+
+    function init() {
+        //alert("teszt");
+
+        // Böngésző ablakméret lekérése és méretarány számítása
+        HEIGHT = window.innerHeight;
+        WIDTH = window.innerWidth;
+        aspectRatio = WIDTH / HEIGHT;
+        time = 0;
+
+        // Renderer létrehozása és DOM-hoz adása
+        renderer = new THREE.WebGLRenderer( { antialias: true } );
+        renderer.setSize( WIDTH, HEIGHT );
+        renderer.setClearColor( new THREE.Color(0xaaaaaa) );
+        document.body.appendChild( renderer.domElement );
+
+        // Színtér létrehozása
+        //scene = new THREE.Scene();
+
+        var manager = new THREE.LoadingManager();
+
+        //physiJS scene
+        scene = new Physijs.Scene({ reportsize: 50, fixedTimeStep: 1 / 60 });
+        scene.setGravity(new THREE.Vector3( 0, -30, 0 ));
+        scene.addEventListener(
+            'update',
+            function() {
+                scene.simulate( undefined, 1 );
+//                physics_stats.update();
+            }
+        );
+
+        // Kamera létrehozása és vetítési paramétereinek beállítása
+        camera = new THREE.PerspectiveCamera( 75, aspectRatio, 1, 1000 );
+        camera.position.set( -100, 150, 290 );
+        camera.lookAt( scene.position );
+
+        //Út létrehozása
+        //var roadTexture =  textureLoader.load( '../MagyarAkos/Assets/road.jpg' );
+
+        var textureLoader = new THREE.TextureLoader();
+        var roadTexture = textureLoader.load( '../MagyarAkos/Assets/road.jpg', function ( roadTexture ) {
+            roadTexture.magFilter = THREE.NearestFilter;
+            roadTexture.minFilter = THREE.NearestFilter;
+            roadTexture.wrapS = roadTexture.wrapT = THREE.RepeatWrapping;
+            roadTexture.offset.set( 1.0, 1.0 );
+            roadTexture.anisotropy = 16;
+
+        } );
+
+
+
+//        roadGeometry = new THREE.PlaneGeometry( 5, 1500, 20, 20 );
+//        roadGeometry2 = new THREE.PlaneGeometry( 5, 1500, 20, 20 );
+
+//        var roadMaterial = new THREE.MeshBasicMaterial( {
+//            map: roadTexture,
+//            wireframe: false,
+//            side: THREE.DoubleSide
+//        } );
+
+        var roadMaterial = Physijs.createMaterial(
+            new THREE.MeshLambertMaterial({ map: loader.load( '../MagyarAkos/Assets/road.jpg' ),
+                map: roadTexture,
+                wireframe: false,
+                side: THREE.DoubleSide
+            }),
+                .8, // high friction
+                .3 // low restitution
+        );
+        roadMaterial.map.wrapS = roadMaterial.map.wrapT = THREE.RepeatWrapping;
+        roadMaterial.map.repeat.set( 1, 1 );
+
+
+//        roadMesh = new THREE.Mesh( roadGeometry, roadMaterial );
+//        roadMesh.name = 'roadNormal';
+//        roadMesh2 = new THREE.Mesh( roadGeometry2, roadMaterial );
+//        roadMesh2.name = 'roadNormal2';
+
+        roadMesh = new Physijs.PlaneMesh(
+            new THREE.PlaneGeometry(5, 1500, 20, 20),
+            roadMaterial,
+            0 // mass
+        );
+        roadMesh2 = new Physijs.PlaneMesh(
+            new THREE.PlaneGeometry( 5, 1500, 20, 20),
+            roadMaterial,
+            0 // mass
+        );
+
+        roadMesh.rotation.x = -1.0 * THREE.Math.degToRad( 90 );
+        roadMesh.position.x = -250;
+        roadMesh.position.y = 1.1;
+        roadMesh.scale.set(16,13,13);
+        roadMesh2.rotation.x = -1.0 * THREE.Math.degToRad( 90 );
+        roadMesh2.position.x = -150;
+        roadMesh2.position.y = 1.1;
+        roadMesh2.scale.set(16,13,13);
+
+        scene.add( roadMesh );
+        scene.add( roadMesh2 );
+
+        // 3D felszínháló létrehozása: geometria és anyag összerendelése
+
+        //Talaj geometria
+//        var groundGeometry = new THREE.PlaneGeometry(  2000, 2000, 10, 10 );
+
+        //talaj textúra
+//        var textureLoader = new THREE.TextureLoader();
+//        var texture = textureLoader.load( '../MagyarAkos/Assets/grass.jpg', function ( texture ) {
+//            texture.magFilter = THREE.NearestFilter;
+//            texture.minFilter = THREE.NearestFilter;
+//            texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+//            texture.offset.set( 1.0, 1.0 );
+//            texture.anisotropy = 16;
+//
+//        } );
+
+        var waterTextureLoader = new THREE.TextureLoader(manager);
+        var waterTexture = waterTextureLoader.load( 'Assets/texture/water.jpg' );
+        waterTexture.magFilter = THREE.NearestFilter;
+        waterTexture.minFilter = THREE.NearestFilter;
+
+
+        //talaj material
+        //var texture = textureLoader.load( '../MagyarAkos/Assets/green.jpg' );
+        var groundMaterial = Physijs.createMaterial(
+            new THREE.MeshPhongMaterial( {
+                map: loader.load( '../MagyarAkos/Assets/grass.jpg' ),
+                color: 0xffffff,
+                wireframe: false,
+                //map: texture,
+                side: THREE.DoubleSide
+         }),
+            .8, // high friction
+            .4  // low restitution
+        );
+
+        groundMaterial.map.wrapS = groundMaterial.map.wrapT = THREE.RepeatWrapping;
+        groundMaterial.map.repeat.set( 10, 10 );
+
+        ground = new Physijs.BoxMesh(
+            new THREE.BoxGeometry(2000, 1, 2000),
+            groundMaterial,
+            0 // mass
+        );
+
+
+        //        var groundGeometry = new THREE.PlaneGeometry(  2000, 2000, 10, 10 );
+
+//        var groundMesh = new THREE.Mesh( groundGeometry, groundMaterial );
+//        groundMesh.rotation.x = -1.0 * THREE.Math.degToRad( 90 );
+//        groundMesh.position.set(0,0,0);
+//        scene.add( groundMesh );
+
+//        var modifier = new THREE.SubdivisionModifier( 2 );
+        waterGeometry = new THREE.PlaneBufferGeometry( 600,300 );
+//        smooth = modifier.modify( waterGeometry );
+
+//        waterGeometry.computeFaceNormals();
+        waterGeometry.computeVertexNormals();
+//
+
+        water = new THREE.Water(
+            waterGeometry,
+            {
+                textureWidth: 512,
+                textureHeight: 512,
+                waterNormals: new THREE.TextureLoader().load( 'Assets/waternormals.jpg', function ( texture ) {
+                    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+                }),
+                alpha: 1.0,
+                //sunDirection: light.position.clone().normalize(),
+                sunColor: 0xffffff,
+                waterColor: 0x001e0f,
+                distortionScale:  3.7,
+                fog: scene.fog !== undefined
+            }
+        );
+        water.rotation.x = - Math.PI / 2;
+        water.position.y = 0.45;
+        water.position.x = 205;
+        water.position.z = 310;
+
+        scene.add( water );
+
+        material = new THREE.ShaderMaterial( {
+            uniforms: {
+                time: { value: 5.0 },
+                magnitude: { value: 0.25 },
+                freq: { value: 2.0 },
+                texImage: {value: waterTexture},
+
+
+            },
+            wireframe: false,
+            side: THREE.DoubleSide,
+            vertexShader: document.getElementById( 'vertexShader' ).textContent,
+            fragmentShader: document.getElementById( 'fragmentShader' ).textContent
+        });
+        material.uniforms.shininess = 70;
+
+        //LOADER PRÓBA
+
+        var objLoader = new THREE.OBJLoader();
+
+        var mtlLoader = new THREE.MTLLoader();
+
+        //Erdő(k) betöltése és klónozása, ill. a színtérben való elhelyezése
+        mtlLoader.setPath( '../MagyarAkos/Assets/Objects/' );
+        var url = "ForestB.mtl";
+
+        mtlLoader.load( url, function( materials ) {
+            materials.preload();
+
+            var objLoader = new THREE.OBJLoader();
+            objLoader.setMaterials( materials );
+            objLoader.setPath( '../MagyarAkos/Assets/Objects/' );
+            objLoader.load( 'ForestB.obj', function ( object ) {
+                    object.scale.set(7,7,7);
+                    object.rotation.y = - Math.PI ;
+                    object.position.set(300,60 ,-400);
+
+                    var Forest = object;
+                    // object.position.y = 100;
+                    console.log("x: " + object.position.x + ", y:" + object.position.y + ", z:" + object.position.z);
+
+                    var Forest2 = Forest.clone();
+                    Forest2.position.set(300,60,-100);
+
+                    var Forest3 = Forest.clone();
+                    Forest3.position.set(-500,60,-400);
+
+                    var Forest4 = Forest.clone();
+                    Forest4.position.set(-500,60,-100);
+
+                    // var Forest4 = Forest.clone();
+                    // Forest3.position.set(-500,60,-100);
+                    //Hozzáadjuk a színtérhez
+                    scene.add(Forest);
+                    scene.add(Forest2);
+                    scene.add(Forest3);
+                    scene.add(Forest4);
+
+                },
+                // called when loading is in progresses
+                function ( xhr ) {
+                    console.log( ( xhr.loaded / xhr.total * 100 ) + '% loaded' );
+                },
+                // called when loading has errors
+                function ( error ) {
+                    console.log('An error happened');
+                }
+            )}
+        );
+
+        var carMesh;
+        var car2Mesh;
+
+        mtlLoader.setPath( '../MagyarAkos/Assets/Objects/' );
+        var url = "Car.mtl";
+
+        mtlLoader.load( url, function( materials ) {
+            materials.preload();
+
+            var objLoader = new THREE.OBJLoader();
+            objLoader.setMaterials( materials );
+            objLoader.setPath( '../MagyarAkos/Assets/Objects/' );
+            objLoader.load( 'Car.obj', function ( object ) {
+                    object.scale.set(20,20,20);
+                    //object.rotation.y =  Math.PI ;
+                    object.position.set(-240,00 ,-200);
+
+                    car = object;
+
+                    car2 = object.clone();
+                    car2.position.set(-145,0,500);
+                    car2.rotation.y = Math.PI;
+
+                    carOrientation = car.rotation.y;
+                    // object.position.y = 100;
+                    console.log("x: " + object.position.x + ", y:" + object.position.y + ", z:" + object.position.z);
+                    //Hozzáadjuk a színtérhez
+                    scene.add(car);
+                    scene.add(car2);
+                },
+                // called when loading is in progresses
+                function ( xhr ) {
+                    console.log( ( xhr.loaded / xhr.total * 100 ) + '% loaded' );
+                },
+                // called when loading has errors
+                function ( error ) {
+                    console.log('An error happened');
+                }
+            )}
+        );
+
+        handleCollision = function( collided_with, linearVelocity, angularVelocity ) {
+
+            }
+
+            /*
+        car.addEventListener( 'collision', handleCollision );
+        car.addEventListener( 'ready', spawnBox );
+
+        car2.addEventListener( 'collision', handleCollision );
+        car2.addEventListener( 'ready', spawnBox );
+        */
+
+//         var ambientLight = new THREE.AmbientLight( 0xffffff, 1 );
+//         scene.add( ambientLight )
+
+        //Loaderek
+        var audioLoader = new THREE.AudioLoader(manager);
+
+        //hang hozzáadás
+        var listener = new THREE.AudioListener();
+        camera.add( listener );
+        sound = new THREE.Audio( listener );
+
+        audioLoader.load( "../MagyarAkos/Assets/oldtown.mp3", function( buffer ) {
+            sound.setBuffer( buffer );
+            sound.setLoop( true );
+            sound.setVolume( 0.5 );
+            //sound.play();
+        });
+
+        // Tárgy színtérhez adása
+        ground.receiveShadow = true;
+        ground.position.set(0,-0.1,0);
+        scene.add( ground );
+
+        var ambientLight = new THREE.AmbientLight( 0xffffff, 0.4 );
+        scene.add( ambientLight );
+
+        var pLight = new THREE.PointLight( 0xffffff, 2.0, 60000 );
+        //pLight.position.set( 15, 15, 15 );
+        scene.add( pLight );
+
+        controls =  new THREE.OrbitControls( camera, renderer.domElement );
+
+        controls.maxPolarAngle = Math.PI * 0.49;
+        controls.minDistance = 70;
+        controls.maxDistance = 500;
+        // Az ablak későbbi átméretezése esetén visszahívható függvény megadása
+        window.addEventListener( 'resize', handleWindowResize, false );
+        window.addEventListener( 'keydown', handleKeyDown, true);
+
+        // Első képkocka rajzolása
+
+        //stats
+        stats = new Stats();
+        document.body.appendChild( stats.dom );
+
+
+
+        skyScene();
+        scene.simulate();
+
+        render();
+    }
+
+    //Nappali skybox megadása
+    function skyScene(){
+        scene.background = new THREE.CubeTextureLoader()
+            .setPath( 'Assets/texture/' )
+            .load( [
+                'px.jpg',
+                'nx.jpg',
+                'py.jpg',
+                'ny.jpg',
+                'pz.jpg',
+                'nz.jpg'
+            ] );
+    }
+
+    //Éjszakai skybox megadása
+    function nightScene(){
+        scene.background = new THREE.CubeTextureLoader()
+            .setPath( 'Assets/texture/night/' )
+            .load( [
+                'posx.jpg',
+                'negx.jpg',
+                'posy.jpg',
+                'negy.jpg',
+                'posz.jpg',
+                'negz.jpg'
+            ] );
+    }
+
+
+    function handleWindowResize() {
+        // Az ablak átméretezése esetén a kamera vetítési paraméterek újraszámolása
+        HEIGHT = window.innerHeight;
+        WIDTH = window.innerWidth;
+        console.log( 'WIDTH=' + WIDTH + '; HEIGHT=' + HEIGHT );
+        renderer.setSize( WIDTH, HEIGHT );
+        aspectRatio = WIDTH / HEIGHT;
+        camera.aspect = aspectRatio;
+        camera.updateProjectionMatrix();
+    }
+
+    var forwardDelta = - this.speed * delta;
+    var rot = 0;
+    carOrientation -= ( forwardDelta * 0.02 )
+
+
+    function handleKeyDown( event ) {
+        checkPosition();
+
+        if (event.keyCode == 112 || event.keyCode == 80) {// p lenyomasa
+            if(!soundOn){
+                sound.play();
+                soundOn = true;
+            } else {
+                sound.pause();
+                soundOn = false;
+            }
+
+        } else if (event.keyCode == 70 || event.keyCode == 102) { //köd benyomása
+            if(!fogActive){
+                scene.fog = new THREE.FogExp2(0xD6D6D6, 0.0025);
+                fogActive = true;
+            } else {
+                scene.fog = new THREE.FogExp2( 0xffffff, 0.0000 );
+                fogActive = false;
+            }
+
+        } else if (event.keyCode == 87) { //fel, w, W
+            // this.car.position.z += 10;
+            this.car.position.x += Math.sin(rot) * 10;
+            this.car.position.z += Math.cos(rot) * 10;
+
+
+            // car2.position.x += Math.sin(rot) * 10;
+            // car2.position.z += Math.cos(rot) * 10;
+//            console.log("fel,W, w");
+
+            if (event.keyCode == 65 && event.keyCode == 87) {
+                rot = this.car.rotation.y += Math.PI / 10;
+                this.car.position.x += Math.sin(rot) * 10;
+                this.car.position.z += Math.cos(rot) * 10;
+//                console.log("Pos: x: " + Math.floor(this.car.position.x) + " ,y: " + Math.floor(this.car.position.y) + " ,z: " + Math.floor(this.car.position.z));
+            }
+            if (event.keyCode == 68 && event.keyCode == 87) {
+                rot = this.car.rotation.y += -Math.PI / 10;
+                this.car.position.x += Math.sin(rot) * 10;
+                this.car.position.z += Math.cos(rot) * 10;
+//                console.log("Pos: x: " + Math.floor(this.car.position.x) + " ,y: " + Math.floor(this.car.position.y) + " ,z: " + Math.floor(this.car.position.z));
+            }
+//            console.log("Pos: x: " + Math.floor(this.car.position.x) + " ,y: " + Math.floor(this.car.position.y) + " ,z: " + Math.floor(this.car.position.z));
+
+        } else if (event.keyCode == 83) { //le, s, S
+            //this.car.position.z -= 10;
+            this.car.position.x -= Math.sin(rot) * 10;
+            this.car.position.z -= Math.cos(rot) * 10;
+//            console.log("le, s, S");
+            if (event.keyCode == 65 && event.keyCode == 83) {
+                rot = this.car.rotation.y += Math.PI / 10;
+                this.car.position.x -= Math.sin(rot) * 10;
+                this.car.position.z -= Math.cos(rot) * 10;
+//                console.log("Pos: x: " + Math.floor(this.car.position.x) + " ,y: " + Math.floor(this.car.position.y) + " ,z: " + Math.floor(this.car.position.z));
+            }
+            if (event.keyCode == 68 && event.keyCode == 83) {
+                rot = this.car.rotation.y += -Math.PI / 10;
+                this.car.position.x -= Math.sin(rot) * 10;
+                this.car.position.z -= Math.cos(rot) * 10;
+//                console.log("Pos: x: " + Math.floor(this.car.position.x) + " ,y: " + Math.floor(this.car.position.y) + " ,z: " + Math.floor(this.car.position.z));
+            }
+
+//            console.log("Pos: x: " + Math.floor(this.car.position.x) + " ,y: " + Math.floor(this.car.position.y) + " ,z: " + Math.floor(this.car.position.z));
+
+        } else if (event.keyCode == 65) { //bal, a, A
+            rot = this.car.rotation.y += Math.PI / 10;
+
+            if (event.keyCode == 65 && event.keyCode == 87) {
+                rot = this.car.rotation.y += Math.PI / 10;
+                this.car.position.x += Math.sin(rot) * 10;
+                this.car.position.z += Math.cos(rot) * 10;
+//                console.log("Pos: x: " + Math.floor(this.car.position.x) + " ,y: " + Math.floor(this.car.position.y) + " ,z: " + Math.floor(this.car.position.z));
+            }
+            if (event.keyCode == 65 && event.keyCode == 83) {
+                rot = this.car.rotation.y += Math.PI / 10;
+                this.car.position.x -= Math.sin(rot) * 10;
+                this.car.position.z -= Math.cos(rot) * 10;
+//                console.log("Pos: x: " + Math.floor(this.car.position.x) + " ,y: " + Math.floor(this.car.position.y) + " ,z: " + Math.floor(this.car.position.z));
+            }
+
+            //carOrientation = this.car.rotation.y;
+            //console.log("Car orientation: " + carOrientation + " Delta: " + delta);
+//            console.log("bal, a, A");
+//            console.log("Pos: x: " + Math.floor(this.car.position.x) + " ,y: " + Math.floor(this.car.position.y) + " ,z: " + Math.floor(this.car.position.z));
+
+        } else if (event.keyCode == 68) { //jobb, d, D
+            rot = this.car.rotation.y += -Math.PI / 10;
+
+            if (event.keyCode == 68 && event.keyCode == 87) {
+                rot = this.car.rotation.y -= Math.PI / 10;
+                this.car.position.x += Math.sin(rot) * 10;
+                this.car.position.z += Math.cos(rot) * 10;
+//                console.log("Pos: x: " + Math.floor(this.car.position.x) + " ,y: " + Math.floor(this.car.position.y) + " ,z: " + Math.floor(this.car.position.z));
+            }
+            if (event.keyCode == 68 && event.keyCode == 83) {
+                rot = this.car.rotation.y += Math.PI / 10;
+                this.car.position.x -= Math.sin(rot) * 10;
+                this.car.position.z -= Math.cos(rot) * 10;
+            }
+            // this.car.position.x += Math.sin(carOrientation);
+            // this.car.position.z += Math.cos(carOrientation);
+            //carOrientation = this.car.rotation.y;
+            //console.log("Car orientation: " + carOrientation + " Delta: " + delta);
+//            console.log("jobb, d, D");
+//            console.log("Pos: x: " + Math.floor(this.car.position.x) + " ,y: " + Math.floor(this.car.position.y) + " ,z: " + Math.floor(this.car.position.z));
+
+        } else if (event.keyCode == 87 && event.keyCode == 68) { //w + d
+            this.car.position.x += Math.sin(rot) * 10;
+            this.car.position.z += Math.cos(rot) * 10;
+            rot = this.car.rotation.y += -Math.PI / 10;
+//            console.log(" W + D ");
+//            console.log("Pos: x: " + Math.floor(this.car.position.x) + " ,y: " + Math.floor(this.car.position.y) + " ,z: " + Math.floor(this.car.position.z));
+
+        } else if (event.keyCode == 87 && event.keyCode == 65) { //w + a
+            this.car.position.x += Math.sin(rot) * 10;
+            this.car.position.z += Math.cos(rot) * 10;
+            rot = this.car.rotation.y += Math.PI / 10;
+//            console.log(" W + A ");
+//            console.log("Pos: x: " + Math.floor(this.car.position.x) + " ,y: " + Math.floor(this.car.position.y) + " ,z: " + Math.floor(this.car.position.z));
+
+        } else if (event.keyCode == 83 && event.keyCode == 68) { //s + d
+            this.car.position.x -= Math.sin(rot) * 10;
+            this.car.position.z -= Math.cos(rot) * 10;
+            rot = this.car.rotation.y += -Math.PI / 10;
+//            console.log(" S + D ");
+//            console.log("Pos: x: " + Math.floor(this.car.position.x) + " ,y: " + Math.floor(this.car.position.y) + " ,z: " + Math.floor(this.car.position.z));
+
+        } else if (event.keyCode == 83 && event.keyCode == 65) { //s + a
+            this.car.position.x -= Math.sin(rot) * 10;
+            this.car.position.z -= Math.cos(rot) * 10;
+            rot = this.car.rotation.y += Math.PI / 10;
+//            console.log(" S + A ");
+//            console.log("Pos: x: " + Math.floor(this.car.position.x) + " ,y: " + Math.floor(this.car.position.y) + " ,z: " + Math.floor(this.car.position.z));
+
+        } else if (event.keyCode == 110 || event.keyCode == 78){
+            nightScene();
+
+
+        } else if (event.keyCode == 66) { //b betű
+
+            if(!move){
+                move = true;
+                //resetPosition();
+                sound.play();
+            } else {
+                sound.stop();
+                move = false;
+                sound.pause();
+            }
+
+
+
+        } else if (event.keyCode == 67) { //c betű
+            move = false;
+            this.car.position.set(-240,0 ,-200);
+            this.car2.position.set(-145,0,200);
+            sound.stop();
+
+        } else {
+            skyScene();
+            scene.fog = new THREE.FogExp2( 0xffffff, 0.0000 );
+//            sound.stop();
+
+            console.log("else ág");
+        }
+    }
+
+    resetPosition = function(){
+        this.car.position.set(-240,0 ,-200);
+        this.car.rotation.y = 0;
+
+        car2.position.set(-145,0,500);
+        car2.rotation.y = -Math.PI;
+        rot = 0;
+        rot2 = 0;
+    }
+
+    checkPosition = function(){
+
+        var newX = this.car.position.x;
+        var newY = this.car.position.y;
+        var newZ = this.car.position.z
+
+        if(  this.car.position.z <=70){
+            if(  this.car.position.x < -309 ||  this.car.position.x > -126){
+//                this.car.position.x = prevPosition;
+                 newX = prevX;
+                 newY = prevY;
+                 newZ = prevZ;
+
+                 this.car.position.x = prevX;
+                 this.car.position.y = prevY;
+                 this.car.position.z = prevZ;
+                 console.log("newX: "+Math.round(newX)+"\nnewY: "+Math.round(newY)+"\nnewZ: "+Math.round(newZ));
+
+                console.log("Collision");
+            }else{
+//                this.car.position.x = newPosition;
+                prevX = newX;
+                prevZ = newZ;
+                prevY = newY;
+                console.log("prevX: "+Math.round(prevX)+"\nnprevY: "+Math.round(prevY)+"\nprevZ: "+Math.round(prevZ));
+
+                console.log("Nem Collision");
+            }
+        }else{
+            prevX = newX;
+            prevZ = newZ;
+            prevY = newY;
+            console.log("prevX: "+Math.round(prevX)+"\nnprevY: "+Math.round(prevY)+"\nprevZ: "+Math.round(prevZ));
+
+            console.log("Nem Collision");
+        }
+    }
+
+    animate = function(){
+        checkPosition();
+
+        camera.position.copy( this.car.position ).add( new THREE.Vector3( -30, 55, 150 ) );
+        camera.lookAt( this.car.position );
+
+        this.car.position.x += Math.sin(rot) * 3;
+        this.car.position.z += Math.cos(rot) * 3;
+
+        if(this.car.position.z > 790){
+            this.car.position.z = -790;
+        }
+
+        this.car2.position.x -= Math.sin(rot2) * 3.5;
+        this.car2.position.z -= Math.cos(rot2) * 3.5;
+
+        if(this.car2.position.z < -790){
+            this.car2.position.z = 790;
+        }
+    }
+
+
+    var render = function () {
+        // Újabb képkocka rajzolásának kérése.
+        // Maximálisan 60 FPS-t biztosít a rendszer.
+        requestAnimationFrame( render );
+        delta = clock.getDelta();
+
+        time = time + 0.09;
+        if (sinusSpeed <= 170)
+            sinusSpeed += 3.2;
+        else
+            sinusSpeed = 0;
+
+        water.material.uniforms.time.value += 0.5/ 60.0;
+
+        if(move){
+            animate();
+        }
+
+        controls.update();
+        stats.update();
+        // 3D -> 2D vetített kép kiszámítása.
+        // scene 3D színtér képe a camera kamera szemszögéből.
+        renderer.render( scene, camera );
+        // renderer.render( skyScene, skyCamera );
+    };
+
+</script>
+</body>
+</html>
