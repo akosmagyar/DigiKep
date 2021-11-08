@@ -1,3 +1,3 @@
-#Fejlett-grafika
+#Képfeldolgozás
 
 ##Kötelező program
