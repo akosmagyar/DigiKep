@@ -1,3 +1,3 @@
-#Képfeldolgozás
+# Digitáális képfeldolgozás haladóknak MSc kurzus
 
-##Kötelező program
+## Kötelező program
